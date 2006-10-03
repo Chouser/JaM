@@ -235,7 +235,6 @@ var JaM = {};
             l = t.line || 0;
             c = t.from || 0;
         }
-        /*
         jslint.errors.push({
             id: '(error)',
             reason: m,
@@ -243,6 +242,7 @@ var JaM = {};
             line: l,
             character: c
         });
+        /*
         if (option.passfail) {
             jslint.errors.push(null);
             throw null;
@@ -2161,61 +2161,98 @@ var JaM = {};
 
 //// end excerpt from jslintfull.js
 
-  var symtree = [[]];
-  var cursorstack = [ symtree[ 0 ], symtree ];
   var quote;
+  var tokstream = [];
+  var testMacros = [];
+  var maxiter = 100;
+  JaM.errors = [];
+  var jslint = { errors: JaM.errors };
 
   function ncollapse( tree ) {
-    for( var i in tree ) {
+    for( var i = 0; i < tree.length; ++i ) {
       if( tree[ i ].constructor == Array ) {
-        tree[ i ] = ncollapse( tree[ i ] );
+        tree[ i ] = ' ' + ncollapse( tree[ i ] ) + ' ';
       }
+      /*
       else if( tree[ i ].id == '(endline)' ) {
-        tree[ i ] = '\n';
+        tree[ i ] = '';
       }
+      else if( tree[ i ].id == '(end)' ) {
+        tree[ i ] = '';
+      }
+      */
       else {
-        tree[ i ] = tree[ i ].value;
+        if( tree[ i+1 ] && tree[ i ].identifier && tree[ i+1 ].identifier )
+        {
+          tree[ i ] = tree[ i ].value + ' ';
+        }
+        else {
+          tree[ i ] = tree[ i ].value;
+        }
       }
     }
-    var str = tree.join(' ');
+    var str = tree.join('');
     tree.length = 0;
     return str;
   }
 
-  function strtree( syntree ) {
-    var out = [];
+  JaM.strtree = function( syntree ) {
+    var sym, out = [];
     for( var i in syntree ) {
-      if( syntree[ i ].constructor == Array ) {
-        out.push( strtree( syntree[ i ] ) );
+      sym = syntree[ i ] || {value:'*nil*'};
+      if( sym.constructor == Array ) {
+        out.push( JaM.strtree( sym ) );
       }
       else {
-        out.push( syntree[ i ].value );
+        out.push( sym.value );
       }
     }
     return out;
   }
 
   function macroexpand( intree, sublevel ) {
-    console.log( "sub %o: %o", sublevel, strtree( intree ) );
+    console.log( "sub %o: %o", sublevel, JaM.strtree( intree ) );
     var outtree = [];
-    var tok, jsstr;
-    while( intree.length ) {
-      // XXX allow macros to examine and unshift any changes back onto intree
-      if( intree[ 0 ].constructor == Array ) {
-        intree.unshift( macroexpand( intree.shift(), true ) );
+    var tok, jsstr, maci, iteri;
+
+    // XXX allow macros to examine and unshift any changes back onto intree
+    var match = true;
+    for( iteri = 0; match && iteri < maxiter; ++iteri ) {
+      match = false;
+      for( maci in testMacros ) {
+        match = testMacros[ maci ]( intree );
+        if( match ) {
+          break;
+        }
       }
+    }
+    if( iteri >= maxiter ) {
+      throw("Recursive macro?");
+    }
+
+    while( intree.length ) {
       tok = intree.shift();
+
+      if( tok.constructor == Array ) {
+        tok = macroexpand( tok, true );
+      }
+
       outtree.push( tok );
-      if( ( tok.constructor == Array && tok[0].id == '{' ) || tok.id == ';'){
-        if( sublevel ) {
-          console.log( "sub expr: %o", strtree( outtree ) );
+
+      if( ! sublevel ) {
+        if( intree[ 0 ]
+            && intree[ 0 ][ 0 ]
+            && outtree[ 0 ][ 0 ].id == 'if'
+            && intree[ 0 ][ 0 ].id == 'else' )
+        {
+          outtree.push( intree.shift() );
+          continue;
         }
-        else {
-          console.log( "final expr: %o", strtree( outtree ) );
-          jsstr = ncollapse( outtree );
-          console.log( jsstr );
-          eval( jsstr );
-        }
+        console.log( "final expr: %o", JaM.strtree( outtree ) );
+        jsstr = ncollapse( outtree );
+        console.log( jsstr );
+        eval( jsstr );
+        outtree = [];
       }
     }
 
@@ -2223,50 +2260,37 @@ var JaM = {};
   }
 
   function pushtoken( tok ) {
-    var subtree;
-    /*
-    console.log( "%s %s (line %d, char %d) %o",
-        tok.value, tok.type, tok.line, tok.character, tok );
-        */
-    if( /^[\[{(]$/.exec( tok.id ) ) {
-      subtree = [];
-      cursorstack[ 0 ].push( subtree );
-      cursorstack.unshift( subtree );
+    if( tok.id != '(endline)' && tok.id != '(end)' ) {
+      tokstream.push( tok );
     }
-    else if( ! /^[\]})]$/.exec( tok.id ) ) {
-      if( cursorstack[0][0] && /^[\[{(]$/.exec( cursorstack[ 0 ][ 0 ].id ) ) {
-        subtree = [];
-        cursorstack[ 0 ].push( subtree );
-        cursorstack.unshift( subtree );
-      }
-    }
-    else {
-      if( cursorstack[0][0] && ! /^[\[{(]$/.exec( cursorstack[ 0 ][ 0 ].id ) ) {
-        cursorstack.shift();
-      }
-    }
-
-    if( '(endline)' != tok.id ) {
-      cursorstack[ 0 ].push( tok );
-    }
-    if( '/' == tok.value ) console.log( tok ); // XXX regex
-
-    if( /^[\]})]$/.exec( tok.id ) ) {
-      cursorstack.shift();
-      if( '}' == tok.id ) {
-        cursorstack.shift();
-      }
-    }
-    else if( ';' == tok.id ) {
-      cursorstack.shift();
-      subtree = [];
-      cursorstack[ 0 ].push( subtree );
-      cursorstack.unshift( subtree );
-    }
-
-    console.log( "%o", strtree( symtree ) );
-
     return tok;
+  }
+
+  function tok2tree( stream ) {
+    var out = [];
+    var expr = [];
+    var subexpr;
+    var tok;
+    //console.log( "parse: %o", JaM.strtree( stream ) );
+    while( stream.length ) {
+      tok = stream.shift();
+      if( /^[\[{(]$/.exec( tok.id ) ) {
+        expr.push( [ tok, tok2tree( stream ), stream.shift() ] );
+      }
+      else if( /^[\]})]$/.exec( tok.id ) ) {
+        stream.unshift( tok );
+        break;
+      }
+      else {
+        expr.push( tok );
+      }
+      if( /^[;{]$/.exec( tok.id ) ) {
+        out.push( expr );
+        expr = [];
+      }
+    }
+    out.push( expr );
+    return out;
   }
 
   JaM.getText = function( url, func ) {
@@ -2292,6 +2316,7 @@ var JaM = {};
     lookahead = [];
     lex.init( js );
 
+/*
     prevtoken = token = syntax['(begin)'];
     console.log( 'advance' );
     advance();
@@ -2299,13 +2324,22 @@ var JaM = {};
     statements();
     console.log( 'advance end' );
     advance('(end)');
+    */
+    while( ! token || token.value != '(end)' ) {
+      token = lex.token() ;
+      pushtoken( token );
+    }
 
+    var symtree = tok2tree( tokstream );
+    console.log( "tree: %o", JaM.strtree( symtree ) );
     macroexpand( symtree );
-
-    console.log( "%o", symtree );
   };
 
   JaM.include = function( url ) {
     JaM.getText( url, JaM.eval );
+  };
+
+  JaM.defTestMacro = function( func ) {
+    testMacros.push( func );
   };
 })();
