@@ -195,7 +195,7 @@ var JaM = {};
 */
         xtype,
 // token
-        tx = /^([(){}[.,:;'"~]|\](\]>)?|\?>?|==?=?|\/(\*(global|extern)*|=|)|\*[\/=]?|\+[+=]?|-[-=]?|%[=>]?|&[&=]?|\|[|=]?|>>?>?=?|<([\/=%\?]|\!(\[|--)?|<=?)?|\^=?|\!=?=?|[a-zA-Z_$][a-zA-Z0-9_$]*|[0-9]+([xX][0-9a-fA-F]+|\.[0-9]*)?([eE][+-]?[0-9]+)?)/,
+        tx = /^([(){}[.,:;#'"~]|\](\]>)?|\?>?|==?=?|\/(\*(global|extern)*|=|)|\*[\/=]?|\+[+=]?|-[-=]?|%[=>]?|&[&=]?|\|[|=]?|>>?>?=?|<([\/=%\?]|\!(\[|--)?|<=?)?|\^=?|\!=?=?|[a-zA-Z_$][a-zA-Z0-9_$]*|[0-9]+([xX][0-9a-fA-F]+|\.[0-9]*)?([eE][+-]?[0-9]+)?)/,
 // string ending in single quote
         sx = /^((\\[^\x00-\x1f]|[^\x00-\x1f'\\])*)'/,
         sxx = /^(([^\x00-\x1f'])*)'/,
@@ -298,6 +298,8 @@ var JaM = {};
             t.from = from;
             return t;
         }
+
+        JaM.it = it;
 
 // Public lex methods
 
@@ -1572,6 +1574,7 @@ var JaM = {};
     delim(';');
     delim(':').reach = true;
     delim(',');
+    delim('#'); // Chouser: special for JaM
     reserve('else');
     reserve('case').reach = true;
     reserve('default').reach = true;
@@ -2210,8 +2213,8 @@ var JaM = {};
     return out;
   }
 
-  function macroexpand( intree, sublevel ) {
-    console.log( "sub %o: %o", sublevel, JaM.strtree( intree ) );
+  JaM.macroexpand = function( intree, sublevel ) {
+    //console.log( "sub %o: %o", sublevel, JaM.strtree( intree ) );
     var outtree = [];
     var tok, jsstr, maci, iteri;
 
@@ -2234,7 +2237,7 @@ var JaM = {};
       tok = intree.shift();
 
       if( tok.constructor == Array ) {
-        tok = macroexpand( tok, true );
+        tok = JaM.macroexpand( tok, true );
       }
 
       outtree.push( tok );
@@ -2248,7 +2251,9 @@ var JaM = {};
           outtree.push( intree.shift() );
           continue;
         }
-        console.log( "final expr: %o", JaM.strtree( outtree ) );
+        console.log( "final expr: %o %o",
+          { foo: JaM.strtree( outtree ) },
+          JaM.strtree( outtree ) );
         jsstr = ncollapse( outtree );
         console.log( jsstr );
         eval( jsstr );
@@ -2284,7 +2289,7 @@ var JaM = {};
       else {
         expr.push( tok );
       }
-      if( /^[;{]$/.exec( tok.id ) ) {
+      if( /^[;{,]$/.exec( tok.id ) ) {
         out.push( expr );
         expr = [];
       }
@@ -2332,7 +2337,7 @@ var JaM = {};
 
     var symtree = tok2tree( tokstream );
     console.log( "tree: %o", JaM.strtree( symtree ) );
-    macroexpand( symtree );
+    JaM.macroexpand( symtree );
   };
 
   JaM.include = function( url ) {
@@ -2342,4 +2347,113 @@ var JaM = {};
   JaM.defTestMacro = function( func ) {
     testMacros.push( func );
   };
+
+
+  // that was the core, now lets make things easy...
+
+  JaM.foreachHashSym = function( tree, func ) {
+    var repl;
+    tree = [].concat( tree );
+    for( var i = 0; i < tree.length; ++i ) {
+      if( tree[ i ].value == '#' ) {
+        repl = func( tree[ i + 1 ] );
+        tree.splice.apply( tree, [ i, 2 ].concat( repl ) );
+        i += repl.length - 1;
+      }
+      else if( tree[ i ].constructor == Array ) {
+        tree[ i ] = JaM.foreachHashSym( tree[ i ], func );
+      }
+    }
+    return tree;
+  };
+
+  JaM.populateTree = function( tree, params ) {
+    console.log( "tree: %o\nparams: %o", JaM.strtree(tree), JaM.strtree(params) );
+    tree = JaM.foreachHashSym( tree, function( ref ) {
+      return [ params[ ref.value ] ];
+    });
+    console.log( "tree: %o", JaM.strtree(tree) );
+
+    return tree;
+  };
+
+  // This defines a macro for the {{ }} syntax
+  JaM.treedb = [];
+  JaM.defTestMacro( function( intree ) {
+    if(  intree
+      && intree[ 0 ]
+      && intree[ 0 ].value == '{'
+      && intree[ 1 ]
+      && intree[ 1 ][ 0 ]
+      && intree[ 1 ][ 0 ][ 0 ]
+      && intree[ 1 ][ 0 ][ 0 ][ 0 ]
+      && intree[ 1 ][ 0 ][ 0 ][ 0 ].value == '{' )
+    {
+      var t = intree[ 1 ][ 0 ][ 0 ][ 1 ];
+
+      var exprlist = [];
+      var exprcount = 0;
+
+      t = JaM.foreachHashSym( t, function( expr ) {
+        if( exprlist.length > 0 ) {
+          exprlist.push( JaM.it( '(identifier)', ',' ) );
+        }
+
+        exprlist.push( expr );
+        exprcount += 1;
+
+        return [ JaM.it( '(identifier)', '#' ), { value: exprcount - 1 } ];
+      });
+
+      var treedbid = JaM.treedb.length;
+      JaM.treedb.push( t );
+
+      intree.splice( 0, 3,
+        JaM.it( '(identifier)', "JaM" ),
+        JaM.it( '(identifier)', "." ),
+        JaM.it( '(identifier)', "populateTree" ),
+        [
+          JaM.it( '(identifier)', "(" ),
+          [
+            [
+              JaM.it( '(identifier)', "JaM" ),
+              JaM.it( '(identifier)', "." ),
+              JaM.it( '(identifier)', "treedb" ),
+              [
+                JaM.it( '(identifier)', "[" ),
+                [
+                  [
+                    JaM.it( '(identifier)', '' + treedbid )
+                  ]
+                ],
+                JaM.it( '(identifier)', "]" )
+              ],
+              JaM.it( '(identifier)', "," )
+            ],
+            [
+              [
+                JaM.it( '(identifier)', "[" ),
+                exprlist,
+                JaM.it( '(identifier)', "]" )
+              ]
+            ]
+          ],
+          JaM.it( '(identifier)', ")" )
+        ]
+      );
+
+      console.log( 'Match: %o', JaM.strtree( intree ) );
+      return true;
+    }
+    return false;
+  });
+
+  // for test08:
+
+  var genSymCount = 0;
+  JaM.genSym = function() {
+    genSymCount += 1;
+    return JaM.it( '(identifier)', '$genSym' + genSymCount + '$' );
+  };
+
 })();
