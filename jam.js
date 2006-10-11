@@ -2169,6 +2169,7 @@ var JaM = {};
   var testMacros = [];
   var maxiter = 100;
   JaM.errors = [];
+  JaM.expandfile = {};
   var jslint = { errors: JaM.errors };
 
   function ncollapse( tree ) {
@@ -2185,7 +2186,10 @@ var JaM = {};
       }
       */
       else {
-        if( tree[ i+1 ] && tree[ i ].identifier && tree[ i+1 ].identifier )
+        if( tree[ i ].endlineafter ) {
+          tree[ i ] = tree[ i ].value + '\n';
+        }
+        else if( tree[ i+1 ] && tree[ i ].identifier && tree[ i+1 ].identifier )
         {
           tree[ i ] = tree[ i ].value + ' ';
         }
@@ -2213,10 +2217,14 @@ var JaM = {};
     return out;
   }
 
-  JaM.macroexpand = function( intree, sublevel ) {
+  JaM.macroexpand = function( url, intree, sublevel ) {
     //console.log( "sub %o: %o", sublevel, JaM.strtree( intree ) );
     var outtree = [];
     var tok, jsstr, maci, iteri;
+
+    if( ! sublevel ) {
+      JaM.expandfile[ url ] = '';
+    }
 
     // XXX allow macros to examine and unshift any changes back onto intree
     var match = true;
@@ -2237,7 +2245,7 @@ var JaM = {};
       tok = intree.shift();
 
       if( tok.constructor == Array ) {
-        tok = JaM.macroexpand( tok, true );
+        tok = JaM.macroexpand( url, tok, true );
       }
 
       outtree.push( tok );
@@ -2256,6 +2264,7 @@ var JaM = {};
           JaM.strtree( outtree ) );
         jsstr = ncollapse( outtree );
         console.log( jsstr );
+        JaM.expandfile[ url ] += jsstr + '\n';
         eval( jsstr );
         outtree = [];
       }
@@ -2265,7 +2274,12 @@ var JaM = {};
   }
 
   function pushtoken( tok ) {
-    if( tok.id != '(endline)' && tok.id != '(end)' ) {
+    if( tok.id == '(endline)' ) {
+      if( tokstream.length > 0 ) {
+        tokstream[ tokstream.length - 1 ].endlineafter = true;
+      }
+    }
+    else if( tok.id != '(end)' ) {
       tokstream.push( tok );
     }
     return tok;
@@ -2303,13 +2317,13 @@ var JaM = {};
     req.open( 'get', url, true );
     req.onreadystatechange = function() {
       if( req.readyState == 4 ) {
-        func( req.responseText );
+        func( url, req.responseText );
       }
     };
     req.send('');
   };
 
-  JaM.eval = function( js ) {
+  JaM.eval = function( url, js ) {
     option = {};
     functions = [];
     xmode = false;
@@ -2337,7 +2351,7 @@ var JaM = {};
 
     var symtree = tok2tree( tokstream );
     console.log( "tree: %o", JaM.strtree( symtree ) );
-    JaM.macroexpand( symtree );
+    JaM.macroexpand( url, symtree );
   };
 
   JaM.include = function( url ) {
