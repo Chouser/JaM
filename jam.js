@@ -195,7 +195,7 @@ var JaM = {};
 */
         xtype,
 // token
-        tx = /^([(){}[.,:;#'"~]|\](\]>)?|\?>?|==?=?|\/(\*(global|extern)*|=|)|\*[\/=]?|\+[+=]?|-[-=]?|%[=>]?|&[&=]?|\|[|=]?|>>?>?=?|<([\/=%\?]|\!(\[|--)?|<=?)?|\^=?|\!=?=?|[a-zA-Z_$][a-zA-Z0-9_$]*|[0-9]+([xX][0-9a-fA-F]+|\.[0-9]*)?([eE][+-]?[0-9]+)?)/,
+        tx = /^([(){}[.,:;#@'"~]|\](\]>)?|\?>?|==?=?|\/(\*(global|extern)*|=|)|\*[\/=]?|\+[+=]?|-[-=]?|%[=>]?|&[&=]?|\|[|=]?|>>?>?=?|<([\/=%\?]|\!(\[|--)?|<=?)?|\^=?|\!=?=?|[a-zA-Z_$][a-zA-Z0-9_$]*|[0-9]+([xX][0-9a-fA-F]+|\.[0-9]*)?([eE][+-]?[0-9]+)?)/,
 // string ending in single quote
         sx = /^((\\[^\x00-\x1f]|[^\x00-\x1f'\\])*)'/,
         sxx = /^(([^\x00-\x1f'])*)'/,
@@ -1575,6 +1575,7 @@ var JaM = {};
     delim(':').reach = true;
     delim(',');
     delim('#'); // Chouser: special for JaM
+    delim('@'); // Chouser: special for JaM
     reserve('else');
     reserve('case').reach = true;
     reserve('default').reach = true;
@@ -2172,36 +2173,49 @@ var JaM = {};
   JaM.expandfile = {};
   var jslint = { errors: JaM.errors };
 
-  function ncollapse( tree ) {
+  function collapse( tree ) {
+    var strlist = [];
     for( var i = 0; i < tree.length; ++i ) {
       if( tree[ i ].constructor == Array ) {
-        tree[ i ] = ' ' + ncollapse( tree[ i ] ) + ' ';
+        strlist.push( ' ' + collapse( tree[ i ] ) + ' ' );
       }
       /*
       else if( tree[ i ].id == '(endline)' ) {
-        tree[ i ] = '';
+        strlist.push( '' );
       }
       else if( tree[ i ].id == '(end)' ) {
-        tree[ i ] = '';
+        strlist.push( '' );
       }
       */
       else {
         if( tree[ i ].endlineafter ) {
-          tree[ i ] = tree[ i ].value + '\n';
+          strlist.push( tree[ i ].value + '\n' );
         }
         else if( tree[ i+1 ] && tree[ i ].identifier && tree[ i+1 ].identifier )
         {
-          tree[ i ] = tree[ i ].value + ' ';
+          strlist.push( tree[ i ].value + ' ' );
         }
         else {
-          tree[ i ] = tree[ i ].value;
+          strlist.push( tree[ i ].value );
         }
       }
     }
-    var str = tree.join('');
-    tree.length = 0;
-    return str;
+    return strlist.join('');
   }
+
+  JaM.deepCopy = function( src ) {
+    var dest, i;
+    if( src instanceof Object && ! ( src instanceof Function ) ) {
+      dest = new src.constructor();
+      for( i in src ) {
+        dest[ i ] = JaM.deepCopy( src[ i ] );
+      }
+    }
+    else {
+      dest = src;
+    }
+    return dest;
+  }; // deepCopy
 
   JaM.strtree = function( syntree ) {
     var sym, out = [];
@@ -2226,7 +2240,7 @@ var JaM = {};
       JaM.expandfile[ url ] = '';
     }
 
-    // XXX allow macros to examine and unshift any changes back onto intree
+    // allow macros to examine and unshift any changes back onto intree
     var match = true;
     for( iteri = 0; match && iteri < maxiter; ++iteri ) {
       match = false;
@@ -2253,23 +2267,21 @@ var JaM = {};
       if( ! sublevel ) {
         if( intree[ 0 ]
             && intree[ 0 ][ 0 ]
+            && outtree[ 0 ][ 0 ]
             && outtree[ 0 ][ 0 ].id == 'if'
             && intree[ 0 ][ 0 ].id == 'else' )
         {
           outtree.push( intree.shift() );
           continue;
         }
-        console.log( "final expr: %o %o",
-          { foo: JaM.strtree( outtree ) },
-          JaM.strtree( outtree ) );
-        jsstr = ncollapse( outtree );
-        console.log( jsstr );
+        console.log( "final expr: %o", JaM.strtree( outtree ) );
+        jsstr = collapse( outtree );
+        console.log( "%s", jsstr );
         JaM.expandfile[ url ] += jsstr + '\n';
         eval( jsstr );
         outtree = [];
       }
     }
-
     return outtree;
   }
 
@@ -2370,7 +2382,7 @@ var JaM = {};
     tree = [].concat( tree );
     for( var i = 0; i < tree.length; ++i ) {
       if( tree[ i ].value == '#' ) {
-        repl = func( tree[ i + 1 ] );
+        repl = JaM.deepCopy( func( tree[ i + 1 ] ) );
         tree.splice.apply( tree, [ i, 2 ].concat( repl ) );
         i += repl.length - 1;
       }
@@ -2378,15 +2390,16 @@ var JaM = {};
         tree[ i ] = JaM.foreachHashSym( tree[ i ], func );
       }
     }
+    //console.log( "hash tree: %o", JaM.strtree(tree) );
     return tree;
   };
 
   JaM.populateTree = function( tree, params ) {
-    console.log( "tree: %o\nparams: %o", JaM.strtree(tree), JaM.strtree(params) );
+    //console.log( "tree: %o\nparams: %o", JaM.strtree(tree), JaM.strtree(params) );
     tree = JaM.foreachHashSym( tree, function( ref ) {
       return [ params[ ref.value ] ];
     });
-    console.log( "tree: %o", JaM.strtree(tree) );
+    //console.log( "tree: %o", JaM.strtree(tree) );
 
     return tree;
   };
@@ -2468,6 +2481,91 @@ var JaM = {};
   JaM.genSym = function() {
     genSymCount += 1;
     return JaM.it( '(identifier)', '$genSym' + genSymCount + '$' );
+  };
+
+  // for test11:
+  JaM.treeMatch = function( data, ptn, bindings ) {
+    //console.log( 'treeMatch data: %o\ntreeMatch ptn: %o', JaM.strtree( data ), JaM.strtree( ptn ) );
+    if( ! bindings ) {
+      bindings = {};
+    }
+    if( data === undefined ) {
+      return false;
+    }
+    else if( data.constructor == Array ) {
+      for( var id = 0, ip = 0; id < data.length || ip < ptn.length; ++id, ++ip){
+        if( ptn && ptn[ ip ] && ptn[ ip ].value == '@' ) {
+          bindings[ ptn[ ip + 1 ].value ] = data[ id ];
+          ip += 1;
+        }
+        else if(
+            ptn
+            && ptn[ ip ]
+            && ptn[ ip ].constructor == Array
+            && ptn[ ip ].length >= 3
+            && ptn[ ip ][ 0 ].value == '@'
+            && ptn[ ip ][ 1 ].value == '*' )
+        {
+          console.log( 'starmatch' );
+          bindings[ ptn[ ip ][ 2 ].value ] = data.splice( id );
+          break;
+        }
+        else if( !ptn || !JaM.treeMatch( data[ id ], ptn[ ip ], bindings ) ) {
+          return false;
+        }
+      }
+      console.log( 'MATCH!!! %o', bindings )
+      //if( ! confirm( 'continue?' ) ) throw 'stopped';
+      return bindings;
+    }
+    else { // token object
+      return ( data && ptn && data.value == ptn.value ) ? bindings : false;
+    }
+  }
+
+  JaM.collectAtSym = function( ptn, atSyms ) {
+    atSyms = atSyms || [];
+    if( ptn.constructor == Array ) {
+      for( var ip = 0; ip < ptn.length; ++ip){
+        if(
+            ptn
+            && ptn[ ip ]
+            && ptn[ ip ].value == '@'
+            && ptn[ ip + 1].value == '*' )
+        {
+          atSyms.push( ptn[ ip + 2] );
+          ip += 2;
+        }
+        else if( ptn && ptn[ ip ] && ptn[ ip ].value == '@' ) {
+          atSyms.push( ptn[ ip + 1 ] );
+          ip += 1;
+        }
+        else if(
+            ptn
+            && ptn[ ip ]
+            && ptn[ ip ].constructor == Array
+            && ptn[ ip ].length >= 3
+            && ptn[ ip ][ 0 ].value == '@'
+            && ptn[ ip ][ 1 ].value == '*' )
+        {
+          atSyms.push( ptn[ ip ][ 2 ] );
+          break;
+        }
+        else {
+          JaM.collectAtSym( ptn[ ip ], atSyms );
+        }
+      }
+    }
+    return atSyms;
+  };
+
+  JaM.delimit = function( tok, list ) {
+    var rtn = [];
+    for( var i = 0; i < list.length - 1; ++i ) {
+      rtn.push( [ list[ i ] ].concat( tok[ 0 ] ) );
+    }
+    rtn.push( [ list[ list.length - 1 ] ] );
+    return rtn;
   };
 
 })();
