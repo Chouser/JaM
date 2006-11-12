@@ -2166,12 +2166,13 @@ var JaM = {};
 //// end excerpt from jslintfull.js
 
   var quote;
-  var tokstream = [];
+  var tokstream;
   var testMacros = [];
   var maxiter = 100;
   JaM.errors = [];
   JaM.expandfile = {};
   var jslint = { errors: JaM.errors };
+  var lastval;
 
   function collapse( tree ) {
     var strlist = [];
@@ -2191,7 +2192,9 @@ var JaM = {};
         if( tree[ i ].endlineafter ) {
           strlist.push( tree[ i ].value + '\n' );
         }
-        else if( tree[ i+1 ] && tree[ i ].identifier && tree[ i+1 ].identifier )
+        else if( tree[ i+1 ]
+            && /[\w$]$/.exec( tree[ i ].value )
+            && /^[\w$]/.exec( tree[ i+1 ].value ) )
         {
           strlist.push( tree[ i ].value + ' ' );
         }
@@ -2202,6 +2205,8 @@ var JaM = {};
     }
     return strlist.join('');
   }
+
+  JaM.collapse = collapse;
 
   JaM.deepCopy = function( src ) {
     var dest, i;
@@ -2256,6 +2261,11 @@ var JaM = {};
     }
 
     while( intree.length ) {
+
+      if( ! sublevel ) {
+        console.log( "expand: %s", collapse( intree[ 0 ] ) );
+      }
+
       tok = intree.shift();
 
       if( tok.constructor == Array ) {
@@ -2278,7 +2288,12 @@ var JaM = {};
         jsstr = collapse( outtree );
         console.log( "%s", jsstr );
         JaM.expandfile[ url ] += jsstr + '\n';
-        eval( jsstr );
+        try {
+          lastval = eval( jsstr );
+        }
+        catch( ex ) {
+          JaM.msg( ex + ':\n' + jsstr, 'error' );
+        }
         outtree = [];
       }
     }
@@ -2329,13 +2344,15 @@ var JaM = {};
     req.open( 'get', url, true );
     req.onreadystatechange = function() {
       if( req.readyState == 4 ) {
-        func( url, req.responseText );
+        func( req.responseText, url );
       }
     };
     req.send('');
   };
 
-  JaM.eval = function( url, js ) {
+  JaM.eval = function( js, url ) {
+    tokstream = [];
+    token = null;
     option = {};
     functions = [];
     xmode = false;
@@ -2363,7 +2380,8 @@ var JaM = {};
 
     var symtree = tok2tree( tokstream );
     console.log( "tree: %o", JaM.strtree( symtree ) );
-    JaM.macroexpand( url, symtree );
+    JaM.macroexpand( url || 'unknown', symtree );
+    return lastval;
   };
 
   JaM.include = function( url ) {
@@ -2394,6 +2412,26 @@ var JaM = {};
     return tree;
   };
 
+  JaM.storeTree = function( tree ) {
+    var exprlist = [];
+    var exprcount = 0;
+
+    JaM.treedb.push(
+      JaM.foreachHashSym( tree, function( expr ) {
+        if( exprlist.length > 0 ) {
+          exprlist.push( JaM.it( '(identifier)', ',' ) );
+        }
+
+        exprlist.push( expr );
+        exprcount += 1;
+
+        return [ JaM.it( '(identifier)', '#' ), { value: exprcount - 1 } ];
+      })
+    );
+
+    return { id: JaM.treedb.length - 1, exprlist: exprlist };
+  };
+
   JaM.populateTree = function( tree, params ) {
     //console.log( "tree: %o\nparams: %o", JaM.strtree(tree), JaM.strtree(params) );
     tree = JaM.foreachHashSym( tree, function( ref ) {
@@ -2416,24 +2454,7 @@ var JaM = {};
       && intree[ 1 ][ 0 ][ 0 ][ 0 ]
       && intree[ 1 ][ 0 ][ 0 ][ 0 ].value == '{' )
     {
-      var t = intree[ 1 ][ 0 ][ 0 ][ 1 ];
-
-      var exprlist = [];
-      var exprcount = 0;
-
-      t = JaM.foreachHashSym( t, function( expr ) {
-        if( exprlist.length > 0 ) {
-          exprlist.push( JaM.it( '(identifier)', ',' ) );
-        }
-
-        exprlist.push( expr );
-        exprcount += 1;
-
-        return [ JaM.it( '(identifier)', '#' ), { value: exprcount - 1 } ];
-      });
-
-      var treedbid = JaM.treedb.length;
-      JaM.treedb.push( t );
+      var dbobj = JaM.storeTree( intree[ 1 ][ 0 ][ 0 ][ 1 ] );
 
       intree.splice( 0, 3,
         JaM.it( '(identifier)', "JaM" ),
@@ -2450,7 +2471,7 @@ var JaM = {};
                 JaM.it( '(identifier)', "[" ),
                 [
                   [
-                    JaM.it( '(identifier)', '' + treedbid )
+                    JaM.it( '(identifier)', '' + dbobj.id )
                   ]
                 ],
                 JaM.it( '(identifier)', "]" )
@@ -2460,7 +2481,7 @@ var JaM = {};
             [
               [
                 JaM.it( '(identifier)', "[" ),
-                exprlist,
+                dbobj.exprlist,
                 JaM.it( '(identifier)', "]" )
               ]
             ]
@@ -2483,7 +2504,7 @@ var JaM = {};
     return JaM.it( '(identifier)', '$genSym' + genSymCount + '$' );
   };
 
-  // for test11:
+  // for test10:
   JaM.treeMatch = function( data, ptn, bindings ) {
     //console.log( 'treeMatch data: %o\ntreeMatch ptn: %o', JaM.strtree( data ), JaM.strtree( ptn ) );
     if( ! bindings ) {
@@ -2495,8 +2516,14 @@ var JaM = {};
     else if( data.constructor == Array ) {
       for( var id = 0, ip = 0; id < data.length || ip < ptn.length; ++id, ++ip){
         if( ptn && ptn[ ip ] && ptn[ ip ].value == '@' ) {
-          bindings[ ptn[ ip + 1 ].value ] = data[ id ];
-          ip += 1;
+          if( ptn[ ip + 1 ].value == '*' ) {
+            bindings[ ptn[ ip + 2 ].value ] = data.splice( id );
+            break;
+          }
+          else {
+            bindings[ ptn[ ip + 1 ].value ] = data[ id ];
+            ip += 1;
+          }
         }
         else if(
             ptn
@@ -2506,7 +2533,6 @@ var JaM = {};
             && ptn[ ip ][ 0 ].value == '@'
             && ptn[ ip ][ 1 ].value == '*' )
         {
-          console.log( 'starmatch' );
           bindings[ ptn[ ip ][ 2 ].value ] = data.splice( id );
           break;
         }
@@ -2523,6 +2549,7 @@ var JaM = {};
     }
   }
 
+  // for test11:
   JaM.collectAtSym = function( ptn, atSyms ) {
     atSyms = atSyms || [];
     if( ptn.constructor == Array ) {
@@ -2567,5 +2594,7 @@ var JaM = {};
     rtn.push( [ list[ list.length - 1 ] ] );
     return rtn;
   };
+
+  JaM.msg = function( str ) { alert( str ); };
 
 })();

@@ -1,0 +1,214 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+    "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+  <head>
+    <title>JaM -- A JavaScript Macro system</title>
+
+    <style type="text/css">
+
+      .header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        background: #99b;
+        border-bottom: 1px #77a solid;
+      }
+
+      #output {
+        margin-top: 3em;
+      }
+
+      #output pre {
+        margin: 0;
+      }
+
+      #input {
+        width: 100%;
+        height: 6em;
+        border: none;
+        border-top: 1px #ddd solid;
+      }
+
+      textarea.cmd {
+        background: #eee;
+      }
+
+      .user { font-weight: bold; }
+      .error { font-weight: bold; color: #b00; }
+      .return { color: #00b; }
+    </style>
+
+    <script type="text/javascript" src="jam.js"></script>
+
+    <script type="text/javascript">
+      var elem = {}
+
+      JaM.msg = function( str, className ) {
+        var pre = document.createElement('pre');
+        pre.className = className;
+        pre.appendChild( document.createTextNode( str ) );
+        elem.output.appendChild( pre );
+
+        var docelem = document.documentElement;
+        docelem.scrollTop = docelem.offsetHeight;
+      }
+
+      function doinclude() {
+        var file = elem.file.value;
+        JaM.msg( "JaM.include( '" + file + "' );", 'user' );
+        JaM.include( file );
+      }
+
+      function doview() {
+        var file = elem.file.value;
+        JaM.msg( 'JaM.getText( "' + file + '", JaM.msg );', 'user' );
+        JaM.getText( file, JaM.msg );
+      }
+
+      var History = {};
+      (function(){
+        var list = [];
+        var i = 0;
+
+        History.clear = function() {
+          list.push( elem.input.value );
+          i = list.length;
+          elem.input.value = '';
+        };
+
+        History.move = function( d ) {
+          if( i + d >= 0 && i + d <= list.length ) {
+            if( i < list.length && list[ i ] != elem.input.value ) {
+              list.push( elem.input.value );
+            }
+            i += d;
+            elem.input.value = i < list.length ? list[ i ] : '';
+          }
+        };
+      })();
+
+      function doeval() {
+        var code = elem.input.value;
+        JaM.msg( code, 'user' );
+        History.clear();
+        JaM.msg( JaM.eval( 'user input', code ), 'return' );
+      }
+
+      var mode = 'ins';
+      function keypress( e ) {
+        //console.log( '%d, %d: "%s"', e.keyCode, e.charCode, String.fromCharCode( e.charCode ) );
+        var code = e.keyCode;
+        var chr = String.fromCharCode( e.charCode );
+        if( mode == 'cmd' ) {
+          if( chr == 'i' ) {
+            mode = 'ins';
+            elem.input.className = mode;
+            e.preventDefault();
+          }
+          else if( chr == 'h' ) {
+            /*
+            var ne = document.createEvent("KeyboardEvent");
+            ne.initKeyEvent(
+                'keypress',true,true,null,false,false,false,false,37,0);
+            elem.input.dispatchEvent( ne );
+            */
+
+            var sel = getSelection();
+            if( sel.rangeCount > 0 ) {
+              var range = sel.getRangeAt( 0 );
+              range.setStart( range.startContainer, range.startOffset - 1 );
+              range.collapse( true );
+            }
+
+            e.preventDefault();
+          }
+          else if( chr == 'k' || code == 38 ) {
+            History.move( -1 );
+            e.preventDefault();
+          }
+          else if( chr == 'j' || code == 40 ) {
+            History.move( +1 );
+            e.preventDefault();
+          }
+          else if( code in [ 33, 34, 35, 36, 37, 39 ] ) {
+            // arrow keys, let them thru
+          }
+          else if( code == 13 ) {
+            mode = 'ins';
+            elem.input.className = mode;
+            doeval();
+            e.preventDefault();
+          }
+          else {
+            e.preventDefault();
+          }
+        }
+        else {
+          // insert mode
+          if( code == 27 ) {
+            mode = 'cmd';
+            elem.input.className = mode;
+            e.preventDefault();
+          }
+          else if( code == 38 ) {
+            History.move( -1 );
+            e.preventDefault();
+          }
+          else if( code == 40 ) {
+            History.move( +1 );
+            e.preventDefault();
+          }
+          else if( code == 13 ) {
+            mode = 'ins';
+            elem.input.className = mode;
+            doeval();
+            e.preventDefault();
+          }
+        }
+      }
+
+      function doload() {
+        for( var id in { input:1, output:1, file:1 } ) {
+          elem[ id ] = document.getElementById( id );
+        }
+
+        elem.input.focus();
+        //elem.input.addEventListener( 'keypress', dokeypress, true );
+      }
+    </script>
+  </head>
+  <body onload="doload()">
+    <table class="header">
+      <tr>
+        <td>
+          <form onsubmit="doinclude(); return false;">
+            <select id="file">
+              <option>test01.js</option>
+              <option>test02.js</option>
+              <option>test03.js</option>
+              <option>test04.js</option>
+              <option>test05.js</option>
+              <option>test06.js</option>
+              <option>test07.js</option>
+              <option>test08.js</option>
+              <option>test09.js</option>
+              <option>test10.js</option>
+              <option>test11.js</option>
+              <option>test12.js</option>
+            </select>
+            <input type="submit" value="include" />
+            <input type="button" value="view" onclick="doview()" />
+          </form>
+        </td>
+        <td style="text-align: right; font-weight: bold; color: #eee;">
+          JaM
+        </td>
+      </tr>
+    </table>
+
+    <div id="output"></div>
+
+    <textarea id="input" onkeypress="keypress(event)"></textarea>
+  </body>
+</html>

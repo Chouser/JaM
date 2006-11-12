@@ -1,0 +1,82 @@
+http://n01se.net/log/?start=20060925
+
+TODO:
+- finish part 3:
+  - comment controls the execution of alert
+  - long for minimal results
+- test page:
+  - add feature to take url param of code to load
+  - button or switch to show code or dump to console on include
+  - put command history in cookie
+  - allow user to add urls of own code, and add them to dropdown and
+    cookie
+- @*foo now matches 2 different things.  When it is at the front of a
+  list, it consumes the whole list:
+    ( a b, c d )  matches  ( @#foo )
+  but if it's not, then it only takes the rest of its level:
+    ( a b, c d )  matches         ( a @#foo, c d )
+    ( a b, c d )  does not match  ( a @#foo, c )
+  so you're out of luck if you wanted a pattern like:
+    ( a b, c d )  matches  ( @#foo, @#bar )
+  because bar will always be null -- foo got everythin g
+
+
+This is part three of a series on JaM.  Here are parts XXX one and XXX
+two.
+
+Once <code>JaM.eval</code> has produced a tree of token objects for an
+entire source file, it begins to alternate between expanding macros
+and evaluating JavaScript as it works on down through the token tree.
+
+<pre>
+JaM.defTestMacro( function( intree ) {
+  if( intree[ 0 ] && intree[ 0 ].value == 'comment' ) {
+    intree.shift(); // consume the word "comment"
+    intree.shift(); // consume the next token branch
+    return true;
+  }
+  return false;
+});
+
+alert( 'see this' );
+comment( alert( 'skip this' ) );
+alert( 'see this too' );
+</pre>
+
+When JaM starts to examine the token tree generated from the above
+source code, it has no macros defined.  So all it needs to do is
+identify the first "statement" and evaluate it as standard JavaScript.
+In this case, it is the call to the <code>JaM.defTestMacro</code>
+function.  This function takes a single parameter -- an anonymous
+function to add to JaM's list of currently defined macros.  We'll call
+this the 'comment' macro.
+
+Once this is done, JaM moves on to the next statement in the token
+tree, which is a call to the built-in <code>alert</code>.  But this
+time we have one macro defined, the 'comment' macro.  So, JaM calls
+the 'comment' macro function, passing it the current token tree which
+starts with <code>alert( 'see this' );</code>.  Now it's up to the
+'comment' macro function to either modify the token tree and return
+true, or to refuse to modify the tree and return false.
+
+The macro checks the first token to see if it's value is 'comment'.
+In this case, the first token actually has the value 'alert', so the
+macro returns false.  JaM takes this return value to mean that the
+macro did not match.  Since JaM has no other macros to try, it simply
+evaluates the first statement, and alert with the words "see this"
+pops up on the screen.
+
+JaM then moves on to the next statement, and again calls each of the
+defined macros in turn.  Again, the 'comment' macro is the only one
+defined.  But this time when it tests the first token, it <b>does</b>
+have a value of 'comment'.  The macro shifts two objects off the token
+tree -- the first is the 'comment' token itself, and the second is an
+array containing the pair of parenthesis and everything inside them.
+The macro doesn't put anything else back on the tree, so the
+<code>comment</code> statement is completely skipped.  The macro
+returns true so that JaM will know it matched.
+
+Finally, JaM goes around one more time, and just like the first
+<code>alert</code>, the last one is evaluated and the words "see this
+too" pop up on the screen.
+
